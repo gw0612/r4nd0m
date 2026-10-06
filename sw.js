@@ -1,6 +1,6 @@
 // Service worker R4ND0M : met l'application en cache pour un usage hors ligne.
 // Aucune donnée (photo, résultat) ne passe par ici : seuls les fichiers de l'app sont servis.
-const CACHE = 'r4nd0m-v1';
+const CACHE = 'r4nd0m-v2';
 const ASSETS = [
   './',
   './index.html',
