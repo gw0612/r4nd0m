@@ -1,0 +1,2145 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<meta name="referrer" content="no-referrer">
+<meta name="description" content="Générateur d'aléa à partir du bruit du capteur photo. Tout se passe dans le navigateur.">
+<!-- Aucune requête réseau possible depuis la page : la photo ne peut physiquement pas la quitter. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' data: blob:; media-src blob: mediastream:; manifest-src 'self'; worker-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="R4ND0M">
+<title>R4ND0M</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #000000;
+    --fg-2: rgba(0, 0, 0, .58);
+    --fg-3: rgba(0, 0, 0, .34);
+    --line: rgba(0, 0, 0, .1);
+    --card: #f4f4f5;
+    --fill: rgba(0, 0, 0, .045);
+    --fill-2: rgba(0, 0, 0, .07);
+    --seg: #ffffff;
+    --seg-shadow: 0 1px 4px rgba(0, 0, 0, .1), 0 0 0 .5px rgba(0, 0, 0, .05);
+    --radius: 20px;
+    --ease: cubic-bezier(.2, .8, .2, 1);
+    --spring: cubic-bezier(.34, 1.36, .64, 1);
+    --sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Inter", "Helvetica Neue", system-ui, sans-serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #000000;
+      --fg: #ffffff;
+      --fg-2: rgba(255, 255, 255, .62);
+      --fg-3: rgba(255, 255, 255, .36);
+      --line: rgba(255, 255, 255, .13);
+      --card: #131314;
+      --fill: rgba(255, 255, 255, .05);
+      --fill-2: rgba(255, 255, 255, .1);
+      --seg: rgba(255, 255, 255, .2);
+      --seg-shadow: none;
+    }
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    min-height: 100dvh;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--sans);
+    font-size: 17px;
+    line-height: 1.47;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    -webkit-tap-highlight-color: transparent;
+  }
+  button, input, textarea { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  p, li { text-wrap: pretty; }
+  [hidden] { display: none !important; }
+
+  .app {
+    width: 100%;
+    max-width: 520px;
+    margin: 0 auto;
+    padding: env(safe-area-inset-top) 16px calc(32px + env(safe-area-inset-bottom));
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+  @media (min-width: 600px) { .app { padding-left: 24px; padding-right: 24px; } }
+
+  /* ---------- Logo ---------- */
+  header {
+    text-align: center;
+    padding: clamp(36px, 8vh, 84px) 0 clamp(26px, 4.5vh, 44px);
+  }
+  .logo {
+    margin: 0;
+    font-size: clamp(64px, 19vw, 112px);
+    font-weight: 800;
+    letter-spacing: -.03em;
+    line-height: .92;
+    font-variant-numeric: tabular-nums;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  /* Les chiffres « leet » en contour : la seule fantaisie, en noir et blanc. */
+  .logo b {
+    font-weight: inherit;
+    color: transparent;
+    -webkit-text-stroke: .026em var(--fg);
+    paint-order: stroke fill;
+    margin: 0 .035em;
+  }
+  .tagline {
+    margin: 16px 0 0;
+    color: var(--fg-2);
+    font-size: 16px;
+    font-weight: 500;
+    letter-spacing: -.01em;
+  }
+
+  /* ---------- Vues ---------- */
+  main { flex: 1; }
+  .view.is-active { animation: viewIn .4s var(--ease) both; }
+  @keyframes viewIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: none; }
+  }
+
+  /* ---------- Viseur ---------- */
+  .viewfinder {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 4 / 5;
+    max-height: 58vh;
+    max-height: 58dvh;
+    border-radius: 28px;
+    overflow: hidden;
+    background: var(--card);
+    transition: transform .3s var(--ease), opacity .3s var(--ease);
+    isolation: isolate;
+  }
+  @media (min-width: 600px) { .viewfinder { aspect-ratio: 4 / 3; } }
+  .viewfinder video {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    object-fit: cover;
+    opacity: 0;
+    transform: scale(1.04);
+    transition: opacity .5s var(--ease), transform .7s var(--ease);
+  }
+  .viewfinder.live video { opacity: 1; transform: none; }
+  .viewfinder video.mirror { transform: scaleX(-1) scale(1.04); }
+  .viewfinder.live video.mirror { transform: scaleX(-1); }
+  .viewfinder.shot { transform: scale(1.03); }
+  .viewfinder.shot.out { opacity: 0; transform: scale(1.06); }
+
+  .vf-idle {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 14px;
+    padding: 24px;
+    text-align: center;
+    color: var(--fg-2);
+    font-size: 15px;
+    transition: opacity .3s var(--ease);
+  }
+  .viewfinder.live .vf-idle { opacity: 0; pointer-events: none; }
+  .vf-idle svg { width: 34px; height: 34px; color: var(--fg-3); }
+  .vf-idle p { margin: 0; max-width: 260px; text-wrap: balance; }
+
+  .flash {
+    position: absolute; inset: 0;
+    background: #fff;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .viewfinder.shot .flash { animation: flash .4s ease-out; }
+  @keyframes flash { 0% { opacity: 0; } 12% { opacity: .9; } 100% { opacity: 0; } }
+
+  .glass {
+    position: absolute;
+    display: flex; align-items: center; gap: 8px;
+    border: 0;
+    background: rgba(0, 0, 0, .45);
+    color: #fff;
+    -webkit-backdrop-filter: blur(16px);
+    backdrop-filter: blur(16px);
+  }
+  .flip {
+    top: 14px; right: 14px;
+    width: 40px; height: 40px;
+    justify-content: center;
+    border-radius: 50%;
+    transition: transform .3s var(--spring);
+  }
+  .flip:active { transform: scale(.9) rotate(-30deg); }
+  .flip svg { width: 19px; height: 19px; }
+
+  .meter {
+    top: 14px; left: 14px;
+    height: 30px;
+    padding: 0 12px 0 10px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    opacity: 0;
+    transition: opacity .4s var(--ease);
+  }
+  .viewfinder.live .meter.ready { opacity: 1; }
+  .meter i {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #fff;
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+  .meter.flat i { animation: none; opacity: .3; }
+  @keyframes pulse { 50% { opacity: .25; } }
+
+  .actions {
+    display: flex; justify-content: center; align-items: center;
+    min-height: 104px;
+    padding-top: 26px;
+  }
+  .hint {
+    margin: 2px auto 0;
+    max-width: 340px;
+    text-align: center;
+    color: var(--fg-3);
+    font-size: 14px;
+    text-wrap: balance;
+  }
+  .hint.error { color: var(--fg); font-weight: 500; animation: viewIn .3s var(--ease); }
+
+  .shutter {
+    position: relative;
+    width: 76px; height: 76px;
+    border-radius: 50%;
+    border: 3px solid var(--fg);
+    background: transparent;
+    padding: 0;
+    animation: viewIn .4s var(--ease) both;
+  }
+  .shutter::after {
+    content: "";
+    position: absolute; inset: 5px;
+    border-radius: 50%;
+    background: var(--fg);
+    transition: transform .25s var(--spring);
+  }
+  .shutter:hover::after { transform: scale(.95); }
+  .shutter:active::after { transform: scale(.84); transition-duration: .1s; }
+  .shutter:disabled { opacity: .4; cursor: default; }
+
+  /* ---------- Boutons ---------- */
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    height: 52px;
+    padding: 0 28px;
+    border-radius: 999px;
+    border: 0;
+    font-size: 17px;
+    font-weight: 600;
+    letter-spacing: -.015em;
+    transition: transform .25s var(--spring), opacity .2s, background-color .2s, color .2s;
+  }
+  .btn:active { transform: scale(.96); transition-duration: .1s; }
+  .btn.primary { background: var(--fg); color: var(--bg); min-width: 210px; }
+  .btn.primary:hover { opacity: .85; }
+  .btn.primary:disabled { opacity: .3; cursor: default; }
+  .btn.ghost { background: transparent; color: var(--fg-2); height: 44px; padding: 0 18px; font-weight: 500; }
+  .btn.ghost:hover { color: var(--fg); background: var(--fill); }
+  .btn svg { width: 18px; height: 18px; flex: none; }
+
+  :focus { outline: none; }
+  :focus-visible { outline: 2px solid var(--fg); outline-offset: 3px; }
+
+  /* ---------- Résultat ---------- */
+  .result {
+    position: relative;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 16px;
+    min-height: 188px;
+    padding: 30px 22px 22px;
+    border-radius: var(--radius);
+    background: var(--card);
+    text-align: center;
+  }
+  .result.has-eye { padding-top: 46px; }
+  .result.has-rows { padding-left: 10px; padding-right: 10px; }
+  .eye {
+    position: absolute; top: 8px; right: 8px;
+    width: 38px; height: 38px;
+    display: grid; place-items: center;
+    border: 0; border-radius: 50%;
+    background: transparent;
+    color: var(--fg-3);
+    transition: color .2s, background-color .2s;
+  }
+  .eye:hover { color: var(--fg); background: var(--fill); }
+  .eye[aria-pressed="true"] { color: var(--fg); }
+  .eye svg { width: 20px; height: 20px; }
+  .eye .closed { display: none; }
+  .eye[aria-pressed="true"] .open { display: none; }
+  .eye[aria-pressed="true"] .closed { display: block; }
+
+  .out {
+    display: block;
+    width: 100%;
+    font-family: var(--mono);
+    font-size: 26px;
+    font-weight: 500;
+    line-height: 1.45;
+    letter-spacing: .01em;
+    word-break: break-all;
+    overflow-wrap: anywhere;
+    -webkit-user-select: all;
+    user-select: all;
+    cursor: text;
+  }
+  .out.m { font-size: 20px; }
+  .out.s { font-size: 16px; line-height: 1.6; }
+  .out.xl { font-size: 52px; font-weight: 600; letter-spacing: -.02em; }
+  .out.empty { color: var(--fg-3); font-family: var(--sans); font-size: 17px; font-weight: 500; letter-spacing: 0; word-break: normal; }
+  .out.grouped { display: flex; flex-wrap: wrap; justify-content: center; column-gap: .6ch; }
+  .out .d, .out .y { color: var(--fg-2); }
+  .out.masked { letter-spacing: .12em; color: var(--fg-2); }
+  .out.fresh { animation: outIn .3s var(--ease) both; }
+  @keyframes outIn { from { opacity: .35; } to { opacity: 1; } }
+
+  /* Plusieurs résultats : une ligne par résultat, toucher = copier la ligne */
+  .out.rows {
+    display: flex; flex-direction: column;
+    gap: 2px;
+    font-size: 13px;
+    line-height: 1.45;
+    -webkit-user-select: text;
+    user-select: text;
+    text-align: left;
+  }
+  .row-item {
+    display: flex; gap: 10px; align-items: baseline;
+    width: 100%;
+    padding: 7px 8px;
+    border: 0; border-radius: 10px;
+    background: transparent;
+    font: inherit;
+    text-align: left;
+    word-break: break-all;
+    animation: outIn .3s var(--ease) both;
+    transition: background-color .2s;
+  }
+  .row-item:hover { background: var(--fill); }
+  .row-item.copied { background: var(--fill-2); }
+  .row-item .n { flex: none; min-width: 2ch; color: var(--fg-3); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .row-item .t { flex: 1; min-width: 0; }
+  .out.rows.sans { font-family: var(--sans); font-size: 16px; font-weight: 500; }
+
+  .out.pick { font-family: var(--sans); font-size: 34px; font-weight: 700; letter-spacing: -.025em; word-break: normal; overflow-wrap: anywhere; line-height: 1.2; }
+
+  /* Dés et pièces */
+  .tiles { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; font-family: var(--sans); }
+  .die {
+    display: grid; place-items: center;
+    width: 54px; height: 54px;
+    border-radius: 14px;
+    background: var(--bg);
+    box-shadow: inset 0 0 0 1.5px var(--fg);
+    font-size: 22px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .die.big { width: 104px; height: 104px; border-radius: 26px; font-size: 46px; box-shadow: inset 0 0 0 2.5px var(--fg); }
+  .coin {
+    display: grid; place-items: center;
+    width: 58px; height: 58px;
+    border-radius: 50%;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .02em;
+    text-transform: uppercase;
+  }
+  .coin.pile { background: var(--fg); color: var(--bg); }
+  .coin.face { background: var(--bg); box-shadow: inset 0 0 0 1.5px var(--fg); }
+  .coin.big { width: 120px; height: 120px; font-size: 17px; }
+  .coin.flip { animation: coinFlip .7s var(--ease) both; }
+  @keyframes coinFlip {
+    from { transform: perspective(400px) rotateY(-900deg) scale(.7); }
+    to   { transform: perspective(400px) rotateY(0) scale(1); }
+  }
+  .die.roll { animation: roll .45s var(--spring) both; }
+  @keyframes roll { from { transform: rotate(-25deg) scale(.6); opacity: 0; } }
+
+  .meta {
+    display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 10px;
+    margin: 0;
+    color: var(--fg-3);
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .meta span + span::before { content: "·"; margin-right: 10px; }
+
+  .copy-row { display: flex; justify-content: center; padding: 22px 0 0; }
+  .copy .check { display: none; }
+  .copy.done .check { display: block; animation: pop .35s var(--spring); }
+  .copy.done .clip { display: none; }
+  @keyframes pop { from { transform: scale(.4); opacity: 0; } }
+  .clip-note {
+    min-height: 20px;
+    margin: 10px 0 0;
+    text-align: center;
+    color: var(--fg-3);
+    font-size: 13px;
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    transition: opacity .3s;
+  }
+  .clip-note:empty { opacity: 0; }
+
+  /* Rapport de bruit */
+  .report { margin-top: 6px; text-align: center; }
+  .report summary {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    list-style: none;
+    color: var(--fg-2);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color .2s, color .2s;
+  }
+  .report summary::-webkit-details-marker { display: none; }
+  .report summary:hover { background: var(--fill); color: var(--fg); }
+  .report summary svg { width: 12px; height: 12px; transition: transform .25s var(--ease); }
+  .report[open] summary svg { transform: rotate(90deg); }
+  .report-body {
+    margin-top: 10px;
+    padding: 6px 16px 14px;
+    border-radius: 16px;
+    background: var(--card);
+    text-align: left;
+    animation: viewIn .3s var(--ease);
+  }
+  .report dl { margin: 0; }
+  .report .r {
+    display: flex; justify-content: space-between; gap: 16px;
+    padding: 9px 0;
+    font-size: 14px;
+  }
+  .report .r + .r { box-shadow: inset 0 .5px 0 var(--line); }
+  .report dt { color: var(--fg-2); }
+  .report dd { margin: 0; font-family: var(--mono); font-size: 13px; font-weight: 500; text-align: right; font-variant-numeric: tabular-nums; }
+  .report .fine { margin: 10px 0 0; color: var(--fg-3); font-size: 12px; line-height: 1.45; }
+
+  /* ---------- Réglages ---------- */
+  .controls {
+    display: flex; flex-direction: column; gap: 22px;
+    margin-top: 28px;
+  }
+
+  .seg {
+    position: relative;
+    display: flex;
+    padding: 3px;
+    border-radius: 12px;
+    background: var(--fill-2);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .seg::-webkit-scrollbar { display: none; }
+  .seg-thumb {
+    position: absolute; top: 3px; bottom: 3px; left: 0;
+    width: 0;
+    border-radius: 9px;
+    background: var(--seg);
+    box-shadow: var(--seg-shadow);
+    transition: transform .35s var(--ease), width .35s var(--ease);
+  }
+  .seg button {
+    position: relative;
+    flex: 1 0 auto;
+    height: 36px;
+    padding: 0 12px;
+    border: 0;
+    background: transparent;
+    color: var(--fg-2);
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: -.01em;
+    white-space: nowrap;
+    transition: color .25s;
+  }
+  .seg button[aria-checked="true"] { color: var(--fg); }
+  .seg.sub { background: transparent; padding: 0; gap: 4px; }
+  .seg.sub .seg-thumb { top: 0; bottom: 0; background: var(--fill-2); box-shadow: none; border-radius: 999px; }
+  .seg.sub button { flex: 0 0 auto; height: 32px; padding: 0 14px; font-size: 13px; }
+  .seg.small button { height: 30px; font-size: 13px; padding: 0 10px; }
+
+  .field .label {
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin-bottom: 10px;
+    font-size: 15px;
+    font-weight: 500;
+    color: var(--fg-2);
+  }
+  .field output { font-family: var(--mono); color: var(--fg); font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    display: block;
+    width: 100%;
+    height: 4px;
+    margin: 12px 0;
+    border-radius: 2px;
+    background: linear-gradient(to right, var(--fg) var(--p, 50%), var(--fill-2) var(--p, 50%));
+    cursor: pointer;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 26px; height: 26px;
+    border-radius: 50%;
+    background: #fff;
+    border: .5px solid rgba(0, 0, 0, .06);
+    box-shadow: 0 3px 8px rgba(0, 0, 0, .18), 0 1px 1px rgba(0, 0, 0, .1);
+    transition: transform .25s var(--spring);
+  }
+  input[type="range"]:active::-webkit-slider-thumb { transform: scale(1.12); }
+  input[type="range"]::-moz-range-thumb {
+    width: 26px; height: 26px;
+    border-radius: 50%;
+    background: #fff;
+    border: .5px solid rgba(0, 0, 0, .06);
+    box-shadow: 0 3px 8px rgba(0, 0, 0, .18), 0 1px 1px rgba(0, 0, 0, .1);
+  }
+
+  .list { border-radius: 16px; background: var(--card); overflow: hidden; }
+  .row {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    min-height: 52px;
+    padding: 0 16px;
+    font-size: 16px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .row + .row { box-shadow: inset 0 .5px 0 var(--line); }
+  .row code { margin-left: 8px; font-family: var(--mono); font-size: 13px; font-weight: 400; color: var(--fg-3); }
+  .row small { display: block; color: var(--fg-3); font-size: 13px; font-weight: 400; }
+  .switch {
+    -webkit-appearance: none;
+    appearance: none;
+    position: relative;
+    flex: none;
+    width: 50px; height: 30px;
+    margin: 0;
+    border-radius: 15px;
+    background: var(--fill-2);
+    cursor: pointer;
+    transition: background-color .25s var(--ease);
+  }
+  .switch::before {
+    content: "";
+    position: absolute; top: 2px; left: 2px;
+    width: 26px; height: 26px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 2px 5px rgba(0, 0, 0, .2);
+    transition: transform .3s var(--spring), background-color .25s;
+  }
+  .switch:checked { background: var(--fg); }
+  .switch:checked::before { transform: translateX(20px); background: var(--bg); }
+
+  .stepper-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .stepper-row .label { margin: 0; }
+  .stepper {
+    display: flex; align-items: center;
+    height: 38px;
+    border-radius: 999px;
+    background: var(--fill-2);
+  }
+  .stepper button {
+    width: 44px; height: 38px;
+    border: 0; background: transparent;
+    font-size: 20px; font-weight: 500;
+    line-height: 1;
+    border-radius: 999px;
+    transition: background-color .2s, opacity .2s;
+  }
+  .stepper button:hover { background: var(--fill); }
+  .stepper button:disabled { opacity: .25; cursor: default; background: transparent; }
+  .stepper output { min-width: 3ch; text-align: center; }
+
+  .range-inputs { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .range-inputs label { display: block; font-size: 13px; font-weight: 500; color: var(--fg-3); margin: 0 0 6px 4px; }
+  .input, .range-inputs input {
+    width: 100%;
+    height: 50px;
+    padding: 0 16px;
+    border-radius: 14px;
+    border: 1px solid transparent;
+    background: var(--card);
+    font-family: var(--mono);
+    font-size: 17px;
+    transition: border-color .2s;
+  }
+  textarea.input {
+    display: block;
+    height: auto;
+    min-height: 132px;
+    padding: 14px 16px;
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.5;
+    resize: vertical;
+  }
+  .input:focus, .range-inputs input:focus { border-color: var(--fg); outline: none; }
+  .range-inputs input[aria-invalid="true"] { border: 1px dashed var(--fg-2); }
+  .field .list { margin-top: 12px; }
+
+  .divider { height: 0; border-top: .5px solid var(--line); margin: 4px 0; }
+
+  .again-row { display: flex; justify-content: center; margin-top: 28px; }
+
+  .notice {
+    margin: 24px 0 0;
+    padding: 14px 16px;
+    border-radius: 16px;
+    background: var(--card);
+    color: var(--fg-2);
+    font-size: 14px;
+    line-height: 1.45;
+  }
+  .notice strong { color: var(--fg); font-weight: 700; }
+
+  /* ---------- Repli : import ---------- */
+  .panel {
+    display: flex; flex-direction: column; align-items: center;
+    padding: 44px 22px 26px;
+    border-radius: 28px;
+    background: var(--card);
+    text-align: center;
+  }
+  .panel > svg { width: 34px; height: 34px; color: var(--fg-3); }
+  .panel h2 { margin: 18px 0 8px; font-size: 22px; font-weight: 700; letter-spacing: -.02em; }
+  .panel p { margin: 0; color: var(--fg-2); font-size: 15px; max-width: 360px; text-wrap: balance; }
+  .panel .btn.primary { margin-top: 28px; }
+  .panel .notice { text-align: left; text-wrap: pretty; background: var(--bg); }
+  .panel .ghost { margin-top: 12px; }
+
+  /* ---------- Comment ça marche ---------- */
+  .how {
+    margin-top: clamp(64px, 11vh, 104px);
+    padding-top: 26px;
+    border-top: .5px solid var(--line);
+  }
+  .how h2 { margin: 0 0 12px; font-size: 15px; font-weight: 700; letter-spacing: -.01em; }
+  .how ol { margin: 0; padding: 0; list-style: none; counter-reset: s; }
+  .how li {
+    counter-increment: s;
+    display: grid; grid-template-columns: 26px 1fr;
+    padding: 5px 0;
+    color: var(--fg-2);
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .how li::before { content: counter(s, decimal-leading-zero); font-family: var(--mono); font-size: 11px; font-weight: 600; color: var(--fg-3); padding-top: 3px; }
+
+  .sr-only {
+    position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0;
+    overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1 class="logo" aria-label="R4ND0M"><span id="title" aria-hidden="true">R<b>4</b>ND<b>0</b>M</span></h1>
+    <p class="tagline">L'aléa du bruit de votre capteur photo.</p>
+  </header>
+
+  <main>
+    <!-- Caméra -->
+    <section class="view" data-view="camera" hidden>
+      <div class="viewfinder" id="vf">
+        <video id="video" playsinline muted autoplay></video>
+        <div class="vf-idle">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5A2.5 2.5 0 0 1 5.5 6h1.6l1.4-2h7l1.4 2h1.6A2.5 2.5 0 0 1 21 8.5v9a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z"/><circle cx="12" cy="12.5" r="3.6"/></svg>
+          <p id="vfText">La caméra est utilisée uniquement sur cet appareil. Rien n'est enregistré.</p>
+        </div>
+        <div class="flash"></div>
+        <div class="glass meter" id="meter"><i></i><span id="meterText">Bruit</span></div>
+        <button class="glass flip" id="flip" type="button" aria-label="Changer de caméra" hidden>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12a8 8 0 0 1 13.7-5.6L20 8.5"/><path d="M20 4v4.5h-4.5"/><path d="M20 12a8 8 0 0 1-13.7 5.6L4 15.5"/><path d="M4 20v-4.5h4.5"/></svg>
+        </button>
+      </div>
+      <div class="actions">
+        <button class="btn primary" id="enable" type="button">Activer la caméra</button>
+        <button class="shutter" id="shutter" type="button" aria-label="Prendre la photo" hidden></button>
+      </div>
+      <p class="hint" id="hint" aria-live="polite"></p>
+    </section>
+
+    <!-- Résultat -->
+    <section class="view" data-view="result" hidden>
+      <div class="result">
+        <button class="eye" id="eye" type="button" aria-pressed="false" aria-label="Masquer le résultat" hidden>
+          <svg class="open" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="3"/></svg>
+          <svg class="closed" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4l16 16"/><path d="M9.9 5.8A9.7 9.7 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a17 17 0 0 1-2.9 3.7M6.3 7.4C3.9 9.1 2.5 12 2.5 12S6 18.5 12 18.5c1.6 0 3-.4 4.2-1"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>
+        </button>
+        <div class="out" id="out" role="status" aria-live="polite"></div>
+        <p class="meta" id="meta"></p>
+      </div>
+
+      <div class="copy-row">
+        <button class="btn primary copy" id="copy" type="button">
+          <svg class="clip" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V6.5A2.5 2.5 0 0 0 13.5 4h-7A2.5 2.5 0 0 0 4 6.5v7A2.5 2.5 0 0 0 6.5 16H8"/></svg>
+          <svg class="check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>
+          <span id="copyLabel">Copier</span>
+        </button>
+      </div>
+      <p class="clip-note" id="clipNote" aria-live="polite"></p>
+
+      <details class="report" id="report" hidden>
+        <summary><svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 2.5L8 6l-3.5 3.5"/></svg><span id="reportTitle">Rapport de bruit</span></summary>
+        <div class="report-body">
+          <dl id="reportList"></dl>
+          <p class="fine">Tests de santé (§4.4) et estimateurs de min-entropie (§6.3) de la norme NIST SP 800-90B, appliqués à la différence entre deux images. C'est une vérification à l'exécution, pas une validation ni une certification du capteur.</p>
+        </div>
+      </details>
+
+      <div class="controls">
+        <div class="seg" id="catSeg" role="radiogroup" aria-label="Type de résultat"></div>
+        <div id="subs"></div>
+
+        <div class="field" id="lenField">
+          <label class="label" for="len"><span id="lenLabel">Longueur</span> <output id="lenVal" for="len"></output></label>
+          <input type="range" id="len" min="8" max="128" step="1" value="64">
+        </div>
+
+        <div class="list" id="pwField" hidden>
+          <label class="row"><span>Minuscules<code>a–z</code></span><input type="checkbox" class="switch" data-set="lower" checked></label>
+          <label class="row"><span>Majuscules<code>A–Z</code></span><input type="checkbox" class="switch" data-set="upper" checked></label>
+          <label class="row"><span>Chiffres<code>0–9</code></span><input type="checkbox" class="switch" data-set="digits" checked></label>
+          <label class="row"><span>Symboles<code>#$%&amp;…</code></span><input type="checkbox" class="switch" data-set="symbols" checked></label>
+        </div>
+
+        <div class="field" id="ppField" hidden>
+          <span class="label">Séparateur</span>
+          <div class="seg small" id="sepSeg" role="radiogroup" aria-label="Séparateur"></div>
+          <div class="list">
+            <label class="row"><span>Sans accents</span><input type="checkbox" class="switch" id="noAccents"></label>
+            <label class="row"><span>Majuscule initiale</span><input type="checkbox" class="switch" id="capital"></label>
+          </div>
+        </div>
+
+        <div class="range-inputs" id="intField" hidden>
+          <div>
+            <label for="min">Minimum</label>
+            <input id="min" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" value="1">
+          </div>
+          <div>
+            <label for="max">Maximum</label>
+            <input id="max" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" value="100">
+          </div>
+        </div>
+
+        <div class="field" id="diceField" hidden>
+          <span class="label">Faces</span>
+          <div class="seg small" id="facesSeg" role="radiogroup" aria-label="Nombre de faces"></div>
+        </div>
+
+        <div class="field" id="listField" hidden>
+          <label class="label" for="listInput">Entrées <output id="listCount">0</output></label>
+          <textarea class="input" id="listInput" rows="5" placeholder="Une entrée par ligne" spellcheck="false" autocomplete="off"></textarea>
+          <div class="list">
+            <label class="row"><span>Mélanger toute la liste</span><input type="checkbox" class="switch" id="shuffleAll"></label>
+          </div>
+        </div>
+
+        <div class="field stepper-row" id="countField">
+          <span class="label" id="countLabel">Quantité</span>
+          <div class="stepper">
+            <button type="button" id="dec" aria-label="Moins">−</button>
+            <output id="countVal" aria-live="polite">1</output>
+            <button type="button" id="inc" aria-label="Plus">+</button>
+          </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="list">
+          <label class="row"><span>Effacer le presse-papiers<small>30 secondes après la copie</small></span><input type="checkbox" class="switch" id="clipClear" checked></label>
+        </div>
+      </div>
+
+      <p class="notice" id="notice" hidden></p>
+
+      <div class="again-row">
+        <button class="btn ghost" id="again" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5A2.5 2.5 0 0 1 5.5 6h1.6l1.4-2h7l1.4 2h1.6A2.5 2.5 0 0 1 21 8.5v9a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z"/><circle cx="12" cy="12.5" r="3.6"/></svg>
+          Nouvelle photo
+        </button>
+      </div>
+    </section>
+
+    <!-- Repli : caméra indisponible -->
+    <section class="view" data-view="fallback" hidden>
+      <div class="panel">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8.5A2.5 2.5 0 0 1 5.5 6h1.6l1.4-2h7l1.4 2h1.6A2.5 2.5 0 0 1 21 8.5v9a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z"/><circle cx="12" cy="12.5" r="3.6"/><path d="M3 3l18 18"/></svg>
+        <h2 id="fbTitle">Caméra indisponible</h2>
+        <p id="fbText"></p>
+        <div id="fbImport">
+          <button class="btn primary" id="importBtn" type="button">Importer une image</button>
+          <input type="file" id="file" accept="image/*" class="sr-only" tabindex="-1" aria-hidden="true">
+          <p class="notice"><strong>Moins sûr.</strong> Une image qui existe déjà a pu être vue, copiée ou partagée : son contenu et son bruit ne sont plus secrets. Le résultat reste mélangé à l'aléa du navigateur, mais l'image n'apporte alors aucune garantie.</p>
+        </div>
+        <button class="btn ghost" id="retry" type="button">Réessayer la caméra</button>
+      </div>
+    </section>
+  </main>
+
+  <section class="how" aria-labelledby="howTitle">
+    <h2 id="howTitle">Comment ça marche</h2>
+    <ol>
+      <li>Un capteur photo n'est jamais parfaitement stable : chaque pixel tremble d'un bruit électronique impossible à prévoir.</li>
+      <li>Ce bruit, lu sur deux images brutes et testé selon la norme NIST SP 800-90B, est mélangé à l'aléa du navigateur, haché en SHA-256 puis étendu avec HKDF.</li>
+      <li>Le sujet de la photo n'apporte rien, seul le bruit compte. Rien ne quitte votre appareil et l'image est effacée aussitôt.</li>
+    </ol>
+  </section>
+</div>
+
+<script>
+'use strict';
+
+const $ = (s) => document.querySelector(s);
+const enc = new TextEncoder();
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+const haptic = (ms) => { try { navigator.vibrate && navigator.vibrate(ms); } catch {} };
+const fr = (n, d = 0) => n.toLocaleString('fr-FR', { maximumFractionDigits: d, minimumFractionDigits: 0 });
+
+const el = {
+  title: $('#title'),
+  vf: $('#vf'), video: $('#video'), vfText: $('#vfText'), flip: $('#flip'),
+  meter: $('#meter'), meterText: $('#meterText'),
+  enable: $('#enable'), shutter: $('#shutter'), hint: $('#hint'),
+  eye: $('#eye'), out: $('#out'), meta: $('#meta'), copy: $('#copy'), copyLabel: $('#copyLabel'), clipNote: $('#clipNote'),
+  report: $('#report'), reportList: $('#reportList'),
+  catSeg: $('#catSeg'), subs: $('#subs'),
+  lenField: $('#lenField'), lenLabel: $('#lenLabel'), len: $('#len'), lenVal: $('#lenVal'),
+  pwField: $('#pwField'), ppField: $('#ppField'), sepSeg: $('#sepSeg'), noAccents: $('#noAccents'), capital: $('#capital'),
+  intField: $('#intField'), min: $('#min'), max: $('#max'),
+  diceField: $('#diceField'), facesSeg: $('#facesSeg'),
+  listField: $('#listField'), listInput: $('#listInput'), listCount: $('#listCount'), shuffleAll: $('#shuffleAll'),
+  countField: $('#countField'), countLabel: $('#countLabel'), countVal: $('#countVal'), dec: $('#dec'), inc: $('#inc'),
+  clipClear: $('#clipClear'),
+  notice: $('#notice'), again: $('#again'),
+  fbTitle: $('#fbTitle'), fbText: $('#fbText'), fbImport: $('#fbImport'),
+  importBtn: $('#importBtn'), file: $('#file'), retry: $('#retry'),
+};
+
+/* ---------- Données ---------- */
+
+const SETS = {
+  lower: 'abcdefghijklmnopqrstuvwxyz',
+  upper: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+  digits: '0123456789',
+  symbols: '!#$%&*+-=?@^_~.:;,/()[]{}',
+};
+const HEX = '0123456789abcdef';
+const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+// Liste BIP-39 française (github.com/bitcoin/bips, bip-0039/french.txt) : 2048 mots,
+// tous distincts même sans accents, soit exactement 11 bits par mot.
+const WORDS = 'abaisser abandon abdiquer abeille abolir aborder aboutir aboyer abrasif abreuver abriter abroger abrupt absence absolu absurde abusif abyssal académie acajou acarien accabler accepter acclamer accolade accroche accuser acerbe achat acheter aciduler acier acompte acquérir acronyme acteur actif actuel adepte adéquat adhésif adjectif adjuger admettre admirer adopter adorer adoucir adresse adroit adulte adverbe aérer aéronef affaire affecter affiche affreux affubler agacer agencer agile agiter agrafer agréable agrume aider aiguille ailier aimable aisance ajouter ajuster alarmer alchimie alerte algèbre algue aliéner aliment alléger alliage allouer allumer alourdir alpaga altesse alvéole amateur ambigu ambre aménager amertume amidon amiral amorcer amour amovible amphibie ampleur amusant analyse anaphore anarchie anatomie ancien anéantir angle angoisse anguleux animal annexer annonce annuel anodin anomalie anonyme anormal antenne antidote anxieux apaiser apéritif aplanir apologie appareil appeler apporter appuyer aquarium aqueduc arbitre arbuste ardeur ardoise argent arlequin armature armement armoire armure arpenter arracher arriver arroser arsenic artériel article aspect asphalte aspirer assaut asservir assiette associer assurer asticot astre astuce atelier atome atrium atroce attaque attentif attirer attraper aubaine auberge audace audible augurer aurore automne autruche avaler avancer avarice avenir averse aveugle aviateur avide avion aviser avoine avouer avril axial axiome badge bafouer bagage baguette baignade balancer balcon baleine balisage bambin bancaire bandage banlieue bannière banquier barbier baril baron barque barrage bassin bastion bataille bateau batterie baudrier bavarder belette bélier belote bénéfice berceau berger berline bermuda besace besogne bétail beurre biberon bicycle bidule bijou bilan bilingue billard binaire biologie biopsie biotype biscuit bison bistouri bitume bizarre blafard blague blanchir blessant blinder blond bloquer blouson bobard bobine boire boiser bolide bonbon bondir bonheur bonifier bonus bordure borne botte boucle boueux bougie boulon bouquin bourse boussole boutique boxeur branche brasier brave brebis brèche breuvage bricoler brigade brillant brioche brique brochure broder bronzer brousse broyeur brume brusque brutal bruyant buffle buisson bulletin bureau burin bustier butiner butoir buvable buvette cabanon cabine cachette cadeau cadre caféine caillou caisson calculer calepin calibre calmer calomnie calvaire camarade caméra camion campagne canal caneton canon cantine canular capable caporal caprice capsule capter capuche carabine carbone caresser caribou carnage carotte carreau carton cascade casier casque cassure causer caution cavalier caverne caviar cédille ceinture céleste cellule cendrier censurer central cercle cérébral cerise cerner cerveau cesser chagrin chaise chaleur chambre chance chapitre charbon chasseur chaton chausson chavirer chemise chenille chéquier chercher cheval chien chiffre chignon chimère chiot chlorure chocolat choisir chose chouette chrome chute cigare cigogne cimenter cinéma cintrer circuler cirer cirque citerne citoyen citron civil clairon clameur claquer classe clavier client cligner climat clivage cloche clonage cloporte cobalt cobra cocasse cocotier coder codifier coffre cogner cohésion coiffer coincer colère colibri colline colmater colonel combat comédie commande compact concert conduire confier congeler connoter consonne contact convexe copain copie corail corbeau cordage corniche corpus correct cortège cosmique costume coton coude coupure courage couteau couvrir coyote crabe crainte cravate crayon créature créditer crémeux creuser crevette cribler crier cristal critère croire croquer crotale crucial cruel crypter cubique cueillir cuillère cuisine cuivre culminer cultiver cumuler cupide curatif curseur cyanure cycle cylindre cynique daigner damier danger danseur dauphin débattre débiter déborder débrider débutant décaler décembre déchirer décider déclarer décorer décrire décupler dédale déductif déesse défensif défiler défrayer dégager dégivrer déglutir dégrafer déjeuner délice déloger demander demeurer démolir dénicher dénouer dentelle dénuder départ dépenser déphaser déplacer déposer déranger dérober désastre descente désert désigner désobéir dessiner destrier détacher détester détourer détresse devancer devenir deviner devoir diable dialogue diamant dicter différer digérer digital digne diluer dimanche diminuer dioxyde directif diriger discuter disposer dissiper distance divertir diviser docile docteur dogme doigt domaine domicile dompter donateur donjon donner dopamine dortoir dorure dosage doseur dossier dotation douanier double douceur douter doyen dragon draper dresser dribbler droiture duperie duplexe durable durcir dynastie éblouir écarter écharpe échelle éclairer éclipse éclore écluse école économie écorce écouter écraser écrémer écrivain écrou écume écureuil édifier éduquer effacer effectif effigie effort effrayer effusion égaliser égarer éjecter élaborer élargir électron élégant éléphant élève éligible élitisme éloge élucider éluder emballer embellir embryon émeraude émission emmener émotion émouvoir empereur employer emporter emprise émulsion encadrer enchère enclave encoche endiguer endosser endroit enduire énergie enfance enfermer enfouir engager engin englober énigme enjamber enjeu enlever ennemi ennuyeux enrichir enrobage enseigne entasser entendre entier entourer entraver énumérer envahir enviable envoyer enzyme éolien épaissir épargne épatant épaule épicerie épidémie épier épilogue épine épisode épitaphe époque épreuve éprouver épuisant équerre équipe ériger érosion erreur éruption escalier espadon espèce espiègle espoir esprit esquiver essayer essence essieu essorer estime estomac estrade étagère étaler étanche étatique éteindre étendoir éternel éthanol éthique ethnie étirer étoffer étoile étonnant étourdir étrange étroit étude euphorie évaluer évasion éventail évidence éviter évolutif évoquer exact exagérer exaucer exceller excitant exclusif excuse exécuter exemple exercer exhaler exhorter exigence exiler exister exotique expédier explorer exposer exprimer exquis extensif extraire exulter fable fabuleux facette facile facture faiblir falaise fameux famille farceur farfelu farine farouche fasciner fatal fatigue faucon fautif faveur favori fébrile féconder fédérer félin femme fémur fendoir féodal fermer féroce ferveur festival feuille feutre février fiasco ficeler fictif fidèle figure filature filetage filière filleul filmer filou filtrer financer finir fiole firme fissure fixer flairer flamme flasque flatteur fléau flèche fleur flexion flocon flore fluctuer fluide fluvial folie fonderie fongible fontaine forcer forgeron formuler fortune fossile foudre fougère fouiller foulure fourmi fragile fraise franchir frapper frayeur frégate freiner frelon frémir frénésie frère friable friction frisson frivole froid fromage frontal frotter fruit fugitif fuite fureur furieux furtif fusion futur gagner galaxie galerie gambader garantir gardien garnir garrigue gazelle gazon géant gélatine gélule gendarme général génie genou gentil géologie géomètre géranium germe gestuel geyser gibier gicler girafe givre glace glaive glisser globe gloire glorieux golfeur gomme gonfler gorge gorille goudron gouffre goulot goupille gourmand goutte graduel graffiti graine grand grappin gratuit gravir grenat griffure griller grimper grogner gronder grotte groupe gruger grutier gruyère guépard guerrier guide guimauve guitare gustatif gymnaste gyrostat habitude hachoir halte hameau hangar hanneton haricot harmonie harpon hasard hélium hématome herbe hérisson hermine héron hésiter heureux hiberner hibou hilarant histoire hiver homard hommage homogène honneur honorer honteux horde horizon horloge hormone horrible houleux housse hublot huileux humain humble humide humour hurler hydromel hygiène hymne hypnose idylle ignorer iguane illicite illusion image imbiber imiter immense immobile immuable impact impérial implorer imposer imprimer imputer incarner incendie incident incliner incolore indexer indice inductif inédit ineptie inexact infini infliger informer infusion ingérer inhaler inhiber injecter injure innocent inoculer inonder inscrire insecte insigne insolite inspirer instinct insulter intact intense intime intrigue intuitif inutile invasion inventer inviter invoquer ironique irradier irréel irriter isoler ivoire ivresse jaguar jaillir jambe janvier jardin jauger jaune javelot jetable jeton jeudi jeunesse joindre joncher jongler joueur jouissif journal jovial joyau joyeux jubiler jugement junior jupon juriste justice juteux juvénile kayak kimono kiosque label labial labourer lacérer lactose lagune laine laisser laitier lambeau lamelle lampe lanceur langage lanterne lapin largeur larme laurier lavabo lavoir lecture légal léger légume lessive lettre levier lexique lézard liasse libérer libre licence licorne liège lièvre ligature ligoter ligue limer limite limonade limpide linéaire lingot lionceau liquide lisière lister lithium litige littoral livreur logique lointain loisir lombric loterie louer lourd loutre louve loyal lubie lucide lucratif lueur lugubre luisant lumière lunaire lundi luron lutter luxueux machine magasin magenta magique maigre maillon maintien mairie maison majorer malaxer maléfice malheur malice mallette mammouth mandater maniable manquant manteau manuel marathon marbre marchand mardi maritime marqueur marron marteler mascotte massif matériel matière matraque maudire maussade mauve maximal méchant méconnu médaille médecin méditer méduse meilleur mélange mélodie membre mémoire menacer mener menhir mensonge mentor mercredi mérite merle messager mesure métal météore méthode métier meuble miauler microbe miette mignon migrer milieu million mimique mince minéral minimal minorer minute miracle miroiter missile mixte mobile moderne moelleux mondial moniteur monnaie monotone monstre montagne monument moqueur morceau morsure mortier moteur motif mouche moufle moulin mousson mouton mouvant multiple munition muraille murène murmure muscle muséum musicien mutation muter mutuel myriade myrtille mystère mythique nageur nappe narquois narrer natation nation nature naufrage nautique navire nébuleux nectar néfaste négation négliger négocier neige nerveux nettoyer neurone neutron neveu niche nickel nitrate niveau noble nocif nocturne noirceur noisette nomade nombreux nommer normatif notable notifier notoire nourrir nouveau novateur novembre novice nuage nuancer nuire nuisible numéro nuptial nuque nutritif obéir objectif obliger obscur observer obstacle obtenir obturer occasion occuper océan octobre octroyer octupler oculaire odeur odorant offenser officier offrir ogive oiseau oisillon olfactif olivier ombrage omettre onctueux onduler onéreux onirique opale opaque opérer opinion opportun opprimer opter optique orageux orange orbite ordonner oreille organe orgueil orifice ornement orque ortie osciller osmose ossature otarie ouragan ourson outil outrager ouvrage ovation oxyde oxygène ozone paisible palace palmarès palourde palper panache panda pangolin paniquer panneau panorama pantalon papaye papier papoter papyrus paradoxe parcelle paresse parfumer parler parole parrain parsemer partager parure parvenir passion pastèque paternel patience patron pavillon pavoiser payer paysage peigne peintre pelage pélican pelle pelouse peluche pendule pénétrer pénible pensif pénurie pépite péplum perdrix perforer période permuter perplexe persil perte peser pétale petit pétrir peuple pharaon phobie phoque photon phrase physique piano pictural pièce pierre pieuvre pilote pinceau pipette piquer pirogue piscine piston pivoter pixel pizza placard plafond plaisir planer plaque plastron plateau pleurer plexus pliage plomb plonger pluie plumage pochette poésie poète pointe poirier poisson poivre polaire policier pollen polygone pommade pompier ponctuel pondérer poney portique position posséder posture potager poteau potion pouce poulain poumon pourpre poussin pouvoir prairie pratique précieux prédire préfixe prélude prénom présence prétexte prévoir primitif prince prison priver problème procéder prodige profond progrès proie projeter prologue promener propre prospère protéger prouesse proverbe prudence pruneau psychose public puceron puiser pulpe pulsar punaise punitif pupitre purifier puzzle pyramide quasar querelle question quiétude quitter quotient racine raconter radieux ragondin raideur raisin ralentir rallonge ramasser rapide rasage ratisser ravager ravin rayonner réactif réagir réaliser réanimer recevoir réciter réclamer récolter recruter reculer recycler rédiger redouter refaire réflexe réformer refrain refuge régalien région réglage régulier réitérer rejeter rejouer relatif relever relief remarque remède remise remonter remplir remuer renard renfort renifler renoncer rentrer renvoi replier reporter reprise reptile requin réserve résineux résoudre respect rester résultat rétablir retenir réticule retomber retracer réunion réussir revanche revivre révolte révulsif richesse rideau rieur rigide rigoler rincer riposter risible risque rituel rival rivière rocheux romance rompre ronce rondin roseau rosier rotatif rotor rotule rouge rouille rouleau routine royaume ruban rubis ruche ruelle rugueux ruiner ruisseau ruser rustique rythme sabler saboter sabre sacoche safari sagesse saisir salade salive salon saluer samedi sanction sanglier sarcasme sardine saturer saugrenu saumon sauter sauvage savant savonner scalpel scandale scélérat scénario sceptre schéma science scinder score scrutin sculpter séance sécable sécher secouer sécréter sédatif séduire seigneur séjour sélectif semaine sembler semence séminal sénateur sensible sentence séparer séquence serein sergent sérieux serrure sérum service sésame sévir sevrage sextuple sidéral siècle siéger siffler sigle signal silence silicium simple sincère sinistre siphon sirop sismique situer skier social socle sodium soigneux soldat soleil solitude soluble sombre sommeil somnoler sonde songeur sonnette sonore sorcier sortir sosie sottise soucieux soudure souffle soulever soupape source soutirer souvenir spacieux spatial spécial sphère spiral stable station sternum stimulus stipuler strict studieux stupeur styliste sublime substrat subtil subvenir succès sucre suffixe suggérer suiveur sulfate superbe supplier surface suricate surmener surprise sursaut survie suspect syllabe symbole symétrie synapse syntaxe système tabac tablier tactile tailler talent talisman talonner tambour tamiser tangible tapis taquiner tarder tarif tartine tasse tatami tatouage taupe taureau taxer témoin temporel tenaille tendre teneur tenir tension terminer terne terrible tétine texte thème théorie thérapie thorax tibia tiède timide tirelire tiroir tissu titane titre tituber toboggan tolérant tomate tonique tonneau toponyme torche tordre tornade torpille torrent torse tortue totem toucher tournage tousser toxine traction trafic tragique trahir train trancher travail trèfle tremper trésor treuil triage tribunal tricoter trilogie triomphe tripler triturer trivial trombone tronc tropical troupeau tuile tulipe tumulte tunnel turbine tuteur tutoyer tuyau tympan typhon typique tyran ubuesque ultime ultrason unanime unifier union unique unitaire univers uranium urbain urticant usage usine usuel usure utile utopie vacarme vaccin vagabond vague vaillant vaincre vaisseau valable valise vallon valve vampire vanille vapeur varier vaseux vassal vaste vecteur vedette végétal véhicule veinard véloce vendredi vénérer venger venimeux ventouse verdure vérin vernir verrou verser vertu veston vétéran vétuste vexant vexer viaduc viande victoire vidange vidéo vignette vigueur vilain village vinaigre violon vipère virement virtuose virus visage viseur vision visqueux visuel vital vitesse viticole vitrine vivace vivipare vocation voguer voile voisin voiture volaille volcan voltiger volume vorace vortex voter vouloir voyage voyelle wagon xénon yacht zèbre zénith zeste zoologie'.split(' ');
+
+const CATS = [
+  { id: 'password', label: 'Mot de passe', formats: [['password', 'Caractères'], ['passphrase', 'Phrase']] },
+  { id: 'key', label: 'Clé', formats: [['hex', 'Hex'], ['base64', 'Base64'], ['uuid', 'UUID']] },
+  { id: 'number', label: 'Nombre', formats: [['integer', 'Intervalle'], ['dice', 'Dés']] },
+  { id: 'draw', label: 'Tirage', formats: [['coin', 'Pile ou face'], ['list', 'Liste']] },
+];
+const SECRET = new Set(['password', 'passphrase', 'hex', 'base64', 'uuid']);
+const LEN = {
+  hex:        { min: 8, max: 128, label: 'Longueur' },
+  base64:     { min: 8, max: 128, label: 'Longueur' },
+  password:   { min: 8, max: 64,  label: 'Longueur' },
+  passphrase: { min: 3, max: 12,  label: 'Mots' },
+};
+const COUNT_LABEL = { dice: 'Nombre de dés', coin: 'Lancers', list: 'À tirer' };
+const COUNT_MAX = 20;
+const SEPARATORS = [['-', 'Tiret'], [' ', 'Espace'], ['.', 'Point'], ['', 'Aucun']];
+const FACES = [['4', '4'], ['6', '6'], ['8', '8'], ['10', '10'], ['12', '12'], ['20', '20'], ['100', '100']];
+const SEED_BITS = 256;
+
+/* ---------- État et préférences ---------- */
+
+const state = {
+  view: null,
+  stream: null,
+  facing: 'environment',
+  busy: false,
+  key: null,            // CryptoKey HKDF non extractible, dérivée de la capture
+  source: null,         // 'camera' | 'import'
+  assessment: null,     // rapport SP 800-90B de la dernière capture
+  cat: 'password',
+  sub: { password: 'password', key: 'hex', number: 'integer', draw: 'coin' },
+  len: { hex: 64, base64: 32, password: 20, passphrase: 6 },
+  sets: { lower: true, upper: true, digits: true, symbols: true },
+  pp: { sep: '-', noAccents: false, capital: false },
+  faces: '6',
+  count: { password: 1, passphrase: 1, hex: 1, base64: 1, uuid: 1, integer: 1, dice: 2, coin: 1, list: 1 },
+  shuffleAll: false,
+  clipClear: true,
+  mask: false,
+  res: null,            // dernier résultat, pour le ré-afficher (masquage) sans le régénérer
+  gen: 0,
+};
+const format = () => state.sub[state.cat];
+
+// Préférences d'affichage uniquement (jamais de résultat ni de liste collée).
+const PREFS = 'r4nd0m:prefs:v1';
+function loadPrefs() {
+  let p;
+  try { p = JSON.parse(localStorage.getItem(PREFS) || 'null'); } catch { return; }
+  if (!p || typeof p !== 'object') return;
+  const int = (v, lo, hi, d) => (Number.isInteger(v) && v >= lo && v <= hi ? v : d);
+  if (CATS.some((c) => c.id === p.cat)) state.cat = p.cat;
+  for (const c of CATS) {
+    if (p.sub && c.formats.some(([f]) => f === p.sub[c.id])) state.sub[c.id] = p.sub[c.id];
+  }
+  for (const f in LEN) if (p.len) state.len[f] = int(p.len[f], LEN[f].min, LEN[f].max, state.len[f]);
+  for (const k in SETS) if (p.sets && typeof p.sets[k] === 'boolean') state.sets[k] = p.sets[k];
+  if (!Object.values(state.sets).some(Boolean)) state.sets.lower = true;
+  if (p.pp) {
+    if (SEPARATORS.some(([v]) => v === p.pp.sep)) state.pp.sep = p.pp.sep;
+    if (typeof p.pp.noAccents === 'boolean') state.pp.noAccents = p.pp.noAccents;
+    if (typeof p.pp.capital === 'boolean') state.pp.capital = p.pp.capital;
+  }
+  if (FACES.some(([v]) => v === p.faces)) state.faces = p.faces;
+  for (const f in state.count) if (p.count) state.count[f] = int(p.count[f], 1, f === 'list' ? 100000 : COUNT_MAX, state.count[f]);
+  if (typeof p.shuffleAll === 'boolean') state.shuffleAll = p.shuffleAll;
+  if (typeof p.clipClear === 'boolean') state.clipClear = p.clipClear;
+  if (typeof p.mask === 'boolean') state.mask = p.mask;
+}
+function savePrefs() {
+  const { cat, sub, len, sets, pp, faces, count, shuffleAll, clipClear, mask } = state;
+  try { localStorage.setItem(PREFS, JSON.stringify({ cat, sub, len, sets, pp, faces, count, shuffleAll, clipClear, mask })); } catch {}
+}
+
+/* ---------- Logo ---------- */
+
+// Les deux chiffres défilent puis se fixent (décoratif, Math.random).
+function animateLogo() {
+  const digits = [...el.title.querySelectorAll('b')];
+  const final = digits.map((d) => d.textContent);
+  if (reducedMotion.matches) return;
+  cancelAnimationFrame(el.title._raf);
+  const start = performance.now();
+  const step = (now) => {
+    const p = (now - start) / 750;
+    digits.forEach((d, i) => {
+      d.textContent = p > 0.55 + i * 0.3 ? final[i] : String((Math.random() * 10) | 0);
+    });
+    if (p < 0.85 + digits.length * 0.15) el.title._raf = requestAnimationFrame(step);
+    else digits.forEach((d, i) => { d.textContent = final[i]; });
+  };
+  el.title._raf = requestAnimationFrame(step);
+}
+
+/* ---------- Animation « déchiffrage » ----------
+   Purement décorative : les caractères intermédiaires viennent de Math.random
+   et ne sont jamais utilisés comme résultat. */
+
+function scramble(node, text, glyphs, duration, done) {
+  cancelAnimationFrame(node._raf);
+  if (reducedMotion.matches) { done && done(); return; }
+  const start = performance.now();
+  const fixed = /[-\s.]/;
+  const step = (now) => {
+    const p = Math.min(1, (now - start) / duration);
+    const settled = Math.floor(p * p * text.length);
+    let s = text.slice(0, settled);
+    for (let i = settled; i < text.length; i++) {
+      s += fixed.test(text[i]) ? text[i] : glyphs[(Math.random() * glyphs.length) | 0];
+    }
+    node.textContent = s;
+    if (p < 1) node._raf = requestAnimationFrame(step);
+    else done && done();
+  };
+  node._raf = requestAnimationFrame(step);
+}
+
+/* ---------- Vues ---------- */
+
+function show(name) {
+  state.view = name;
+  document.querySelectorAll('[data-view]').forEach((v) => {
+    const on = v.dataset.view === name;
+    v.hidden = !on;
+    v.classList.toggle('is-active', on);
+  });
+}
+
+const HINT = "Visez ce que vous voulez : c'est le bruit qui compte, pas le sujet.";
+function setHint(text, error = false) {
+  el.hint.textContent = text || HINT;
+  el.hint.classList.toggle('error', error);
+}
+
+function fallback(reason) {
+  stopCamera();
+  const texts = {
+    denied: "L'accès à la caméra a été refusé. Vous pouvez l'autoriser dans les réglages du navigateur, ou importer une image.",
+    none: "Aucune caméra n'a été trouvée sur cet appareil.",
+    unsupported: "Ce navigateur ne donne pas accès à la caméra ici. Ouvrez la page en HTTPS ou en local.",
+    error: "La caméra n'a pas pu démarrer. Elle est peut-être utilisée par une autre application.",
+    nocrypto: "Web Crypto n'est pas disponible dans ce contexte. Ouvrez la page en HTTPS ou en local.",
+  };
+  el.fbTitle.textContent = reason === 'nocrypto' ? 'Contexte non sécurisé' : 'Caméra indisponible';
+  el.fbText.textContent = texts[reason] || texts.error;
+  el.fbImport.hidden = reason === 'nocrypto';
+  el.retry.hidden = reason === 'nocrypto' || reason === 'unsupported';
+  show('fallback');
+}
+
+/* ---------- Caméra ---------- */
+
+function setLive(live) {
+  el.vf.classList.toggle('live', live);
+  el.enable.hidden = live;
+  el.shutter.hidden = !live;
+  el.shutter.disabled = !live;
+}
+
+function stopCamera() {
+  stopMeter();
+  if (state.stream) state.stream.getTracks().forEach((t) => t.stop());
+  state.stream = null;
+  el.video.srcObject = null;
+  setLive(false);
+  el.flip.hidden = true;
+}
+
+async function startCamera() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return fallback('unsupported');
+  show('camera');
+  stopCamera();
+  setHint();
+  el.vf.classList.remove('shot', 'out');
+  el.enable.disabled = true;
+  el.vfText.textContent = 'Ouverture de la caméra…';
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { facingMode: { ideal: state.facing }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+    });
+    if (state.view !== 'camera') { stream.getTracks().forEach((t) => t.stop()); return; }
+    state.stream = stream;
+    el.video.srcObject = stream;
+    await el.video.play().catch(() => {});
+    if (!el.video.videoWidth) await new Promise((r) => el.video.addEventListener('loadedmetadata', r, { once: true }));
+    const settings = stream.getVideoTracks()[0].getSettings();
+    el.video.classList.toggle('mirror', settings.facingMode !== 'environment');
+    setLive(true);
+    startMeter();
+    el.shutter.focus({ preventScroll: true });
+    const devices = await navigator.mediaDevices.enumerateDevices().catch(() => []);
+    el.flip.hidden = devices.filter((d) => d.kind === 'videoinput').length < 2;
+  } catch (err) {
+    const name = err && err.name;
+    if (name === 'NotAllowedError' || name === 'SecurityError') fallback('denied');
+    else if (name === 'NotFoundError' || name === 'OverconstrainedError') fallback('none');
+    else fallback('error');
+  } finally {
+    el.enable.disabled = false;
+    el.vfText.textContent = "La caméra est utilisée uniquement sur cet appareil. Rien n'est enregistré.";
+  }
+}
+
+/* ---------- NIST SP 800-90B ----------
+   Échantillon = différence temporelle (mod 256) du canal vert d'un même pixel entre
+   deux images consécutives : le décor s'annule, il reste le bruit du capteur.
+   Les pixels saturés (noirs ou blancs) sont exclus, ils ne portent aucun bruit. */
+
+const NIST = {
+  H_CLAIM: 0.5,                 // min-entropie revendiquée par échantillon pour fixer les seuils
+  ALPHA_LOG2: 20,               // taux de faux positif α = 2^-20 (§4.4)
+  APT_W: 1024,                  // fenêtre du test de proportion pour des échantillons non binaires
+  MIN_SAMPLES: 16384,
+  REQUIRED_BITS: SEED_BITS + 64, // conditionnement SHA-256 « plein » : h_in ≥ n_out + 64 (§3.1.5)
+};
+// Repetition Count Test (§4.4.1) : C = 1 + ⌈−log2(α) / H⌉
+NIST.RCT_CUTOFF = 1 + Math.ceil(NIST.ALPHA_LOG2 / NIST.H_CLAIM);
+// Adaptive Proportion Test (§4.4.2) : C = 1 + CRITBINOM(W, 2^−H, 1 − α)
+NIST.APT_CUTOFF = 1 + critBinom(NIST.APT_W, 2 ** -NIST.H_CLAIM, 1 - 2 ** -NIST.ALPHA_LOG2);
+
+function critBinom(n, p, target) {
+  const r = Math.log(p) - Math.log1p(-p);
+  let logPmf = n * Math.log1p(-p);
+  let cdf = 0;
+  for (let k = 0; k <= n; k++) {
+    cdf += Math.exp(logPmf);
+    if (cdf >= target) return k;
+    logPmf += Math.log((n - k) / (k + 1)) + r;
+  }
+  return n;
+}
+
+function noiseSamples(a, b, w, h, stride) {
+  const out = new Uint8Array(Math.ceil(w / stride) * Math.ceil(h / stride));
+  let n = 0;
+  for (let y = 0; y < h; y += stride) {
+    let i = (y * w) * 4 + 1;
+    for (let x = 0; x < w; x += stride, i += 4 * stride) {
+      const ga = a[i], gb = b[i];
+      if (ga <= 1 || ga >= 254 || gb <= 1 || gb >= 254) continue;
+      out[n++] = (ga - gb) & 255;
+    }
+  }
+  return out.subarray(0, n);
+}
+
+// §6.3.1 Most Common Value : borne supérieure à 99 % de la probabilité du mode.
+function mcvEntropy(maxCount, n) {
+  if (n < 2) return 0;
+  const p = maxCount / n;
+  const pu = Math.min(1, p + 2.576 * Math.sqrt((p * (1 - p)) / (n - 1)));
+  return -Math.log2(pu);
+}
+
+const POPCOUNT = new Uint8Array(256).map((_, i) => i.toString(2).replace(/0/g, '').length);
+// Transitions internes à chaque octet (bits lus du poids fort au poids faible).
+const TRANS = Array.from({ length: 256 }, (_, v) => {
+  const t = [0, 0, 0, 0];
+  for (let k = 7; k > 0; k--) t[(((v >> k) & 1) << 1) | ((v >> (k - 1)) & 1)]++;
+  return t;
+});
+
+// §6.3.3 Markov, sur la chaîne de bits : probabilité de la séquence de 128 bits la plus probable.
+function markovEntropy(o, ones, L) {
+  const P1 = ones / L, P0 = 1 - P1;
+  const s0 = o[0] + o[1], s1 = o[2] + o[3];
+  const P00 = s0 ? o[0] / s0 : 0, P01 = s0 ? o[1] / s0 : 0;
+  const P10 = s1 ? o[2] / s1 : 0, P11 = s1 ? o[3] / s1 : 0;
+  const lg = (x, e = 1) => (e === 0 ? 0 : x > 0 ? e * Math.log2(x) : -Infinity);
+  const logs = [
+    lg(P0) + lg(P00, 127),
+    lg(P0) + lg(P01, 64) + lg(P10, 63),
+    lg(P0) + lg(P01) + lg(P11, 126),
+    lg(P1) + lg(P10) + lg(P00, 126),
+    lg(P1) + lg(P10, 64) + lg(P01, 63),
+    lg(P1) + lg(P11, 127),
+  ];
+  return Math.min(-Math.max(...logs) / 128, 1);
+}
+
+function assessNoise(a, b, w, h) {
+  const s = noiseSamples(a, b, w, h, 2);
+  const n = s.length;
+  const r = { n, ok: false, reason: null };
+  try {
+    if (n < NIST.MIN_SAMPLES) {
+      r.reason = 'samples';
+      return r;
+    }
+    const counts = new Uint32Array(256);
+    let ones = 0;
+    const o = [0, 0, 0, 0];
+    let prev = -1, run = 0, maxRun = 0;
+    for (let i = 0; i < n; i++) {
+      const v = s[i];
+      counts[v]++;
+      ones += POPCOUNT[v];
+      const t = TRANS[v];
+      o[0] += t[0]; o[1] += t[1]; o[2] += t[2]; o[3] += t[3];
+      if (i > 0) o[((s[i - 1] & 1) << 1) | (v >> 7)]++;
+      // §4.4.1 Repetition Count Test
+      run = v === prev ? run + 1 : 1;
+      prev = v;
+      if (run > maxRun) maxRun = run;
+    }
+    // §4.4.2 Adaptive Proportion Test, fenêtres disjointes de W échantillons
+    let maxApt = 0;
+    for (let start = 0; start + NIST.APT_W <= n; start += NIST.APT_W) {
+      const ref = s[start];
+      let c = 0;
+      for (let j = start; j < start + NIST.APT_W; j++) if (s[j] === ref) c++;
+      if (c > maxApt) maxApt = c;
+    }
+    let maxCount = 0;
+    for (let v = 0; v < 256; v++) if (counts[v] > maxCount) maxCount = counts[v];
+    const L = n * 8;
+    r.hMcv = mcvEntropy(maxCount, n);
+    r.hBitMcv = mcvEntropy(Math.max(ones, L - ones), L);
+    r.hMarkov = markovEntropy(o, ones, L);
+    // §3.1.3 : H = min(H_original, n_bits × H_bitstring)
+    r.hBits = 8 * Math.min(r.hBitMcv, r.hMarkov);
+    r.h = Math.min(r.hMcv, r.hBits);
+    r.rct = { max: maxRun, cutoff: NIST.RCT_CUTOFF, ok: maxRun < NIST.RCT_CUTOFF };
+    r.apt = { max: maxApt, cutoff: NIST.APT_CUTOFF, ok: maxApt < NIST.APT_CUTOFF };
+    r.credited = r.h * n;
+    if (!r.rct.ok) r.reason = 'rct';
+    else if (!r.apt.ok) r.reason = 'apt';
+    else if (r.credited < NIST.REQUIRED_BITS) r.reason = 'entropy';
+    else r.ok = true;
+    return r;
+  } finally {
+    s.fill(0);
+  }
+}
+
+const REFUSAL = {
+  samples: "Capture refusée : l'image est presque entièrement noire ou blanche. Évitez la lumière directe et ne couvrez pas l'objectif.",
+  rct: 'Capture refusée : le bruit se répète trop (test de répétition). La caméra semble figée ou lisse trop l’image. Essayez une scène plus sombre.',
+  apt: 'Capture refusée : une valeur domine le bruit (test de proportion). Essayez une scène plus sombre, où le capteur est plus bruité.',
+  entropy: "Capture refusée : pas assez d'entropie estimée. Essayez une scène plus sombre ou plus détaillée.",
+};
+
+// Indicateur en direct : même estimateur MCV, sur un carré central à pleine résolution.
+const meter = { timer: 0, canvas: null, prev: null, avg: null };
+function startMeter() {
+  stopMeter();
+  const size = 128;
+  meter.canvas = document.createElement('canvas');
+  meter.canvas.width = meter.canvas.height = size;
+  const ctx = meter.canvas.getContext('2d', { willReadFrequently: true });
+  meter.timer = setInterval(() => {
+    const v = el.video;
+    if (!v.videoWidth || document.hidden) return;
+    const sz = Math.min(size, v.videoWidth, v.videoHeight);
+    ctx.drawImage(v, (v.videoWidth - sz) / 2, (v.videoHeight - sz) / 2, sz, sz, 0, 0, sz, sz);
+    const cur = ctx.getImageData(0, 0, sz, sz).data;
+    if (meter.prev && meter.prev.length === cur.length && sameFrame(meter.prev, cur)) {
+      cur.fill(0); // pas de nouvelle image depuis la dernière mesure
+      return;
+    }
+    if (meter.prev && meter.prev.length === cur.length) {
+      const s = noiseSamples(meter.prev, cur, sz, sz, 1);
+      const counts = new Uint32Array(256);
+      for (let i = 0; i < s.length; i++) counts[s[i]]++;
+      const hv = s.length > 512 ? mcvEntropy(Math.max(...counts), s.length) : 0;
+      s.fill(0);
+      meter.avg = meter.avg === null ? hv : meter.avg * 0.6 + hv * 0.4;
+      const flat = meter.avg < NIST.H_CLAIM;
+      el.meter.classList.add('ready');
+      el.meter.classList.toggle('flat', flat);
+      el.meterText.textContent = flat ? 'Bruit insuffisant' : `Bruit ${fr(meter.avg, 1)} bits/px`;
+      meter.prev.fill(0);
+    }
+    meter.prev = cur;
+  }, 350);
+}
+function stopMeter() {
+  clearInterval(meter.timer);
+  if (meter.prev) meter.prev.fill(0);
+  if (meter.canvas) meter.canvas.width = meter.canvas.height = 0;
+  meter.prev = meter.canvas = meter.avg = null;
+  el.meter.classList.remove('ready', 'flat');
+}
+
+// Attend que le capteur livre une nouvelle image (et non la même image ré-affichée).
+function sameFrame(a, b) {
+  const x = new Uint32Array(a.buffer, a.byteOffset, a.length >> 2);
+  const y = new Uint32Array(b.buffer, b.byteOffset, b.length >> 2);
+  for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return false;
+  return true;
+}
+
+function nextFrame(video) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, 250);
+    if ('requestVideoFrameCallback' in video) {
+      video.requestVideoFrameCallback(() => { clearTimeout(timer); setTimeout(resolve, 0); });
+    }
+  });
+}
+
+async function capture() {
+  if (!state.stream || state.busy) return;
+  state.busy = true;
+  el.shutter.disabled = true;
+  el.vf.classList.remove('shot', 'out');
+  void el.vf.offsetWidth;
+  el.vf.classList.add('shot');
+  haptic(12);
+  let canvas = null;
+  let a = null, b = null;
+  try {
+    const v = el.video;
+    const w = v.videoWidth, h = v.videoHeight;
+    canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+    const t0 = performance.now();
+    ctx.drawImage(v, 0, 0, w, h);
+    a = ctx.getImageData(0, 0, w, h).data;
+    const t1 = performance.now();
+    // La seconde image doit être une nouvelle image du capteur : sur un appareil chargé,
+    // le navigateur peut redonner la même. On attend alors la suivante (6 essais au plus).
+    for (let tries = 0; tries < 6; tries++) {
+      await nextFrame(v);
+      ctx.drawImage(v, 0, 0, w, h);
+      if (b) b.fill(0);
+      b = ctx.getImageData(0, 0, w, h).data;
+      if (!sameFrame(a, b)) break;
+    }
+    const t2 = performance.now();
+    ctx.clearRect(0, 0, w, h);
+    canvas.width = canvas.height = 0;
+
+    const report = assessNoise(a, b, w, h);
+    if (!report.ok) {
+      a.fill(0); b.fill(0);
+      haptic([30, 60, 30]);
+      setHint(REFUSAL[report.reason], true);
+      await sleep(300);
+      el.vf.classList.remove('shot');
+      el.shutter.disabled = false;
+      return;
+    }
+
+    stopCamera();
+    const seed = await mix([a, b], [t0, t1, t2]);
+    await setSeed(seed, 'camera', report);
+    el.vf.classList.add('out');
+    await sleep(260);
+    showResult();
+  } catch (err) {
+    console.error(err);
+    fallback('error');
+  } finally {
+    if (a) a.fill(0);
+    if (b) b.fill(0);
+    if (canvas) canvas.width = canvas.height = 0;
+    state.busy = false;
+  }
+}
+
+/* ---------- Entropie ---------- */
+
+// Mélange : sel aléatoire du navigateur + horloges haute résolution + pixels bruts,
+// condensés en SHA-256. Les tampons sources sont mis à zéro.
+async function mix(chunks, times) {
+  const salt = crypto.getRandomValues(new Uint8Array(64));
+  const clock = new Float64Array([...times, performance.now(), performance.timeOrigin, Date.now()]);
+  const clockBytes = new Uint8Array(clock.buffer);
+  const total = salt.length + clockBytes.length + chunks.reduce((n, c) => n + c.length, 0);
+  const buf = new Uint8Array(total);
+  let o = 0;
+  buf.set(salt, o); o += salt.length;
+  buf.set(clockBytes, o); o += clockBytes.length;
+  for (const c of chunks) { buf.set(c, o); o += c.length; c.fill(0); }
+  try {
+    return new Uint8Array(await crypto.subtle.digest('SHA-256', buf));
+  } finally {
+    buf.fill(0);
+    salt.fill(0);
+    clock.fill(0);
+  }
+}
+
+async function setSeed(seed, source, assessment) {
+  try {
+    state.key = await crypto.subtle.importKey('raw', seed, 'HKDF', false, ['deriveBits']);
+  } finally {
+    seed.fill(0);
+  }
+  state.source = source;
+  state.assessment = assessment;
+}
+
+// Flux d'octets HKDF-SHA256 : chaque génération utilise un sel neuf,
+// et le compteur dans `info` permet d'en tirer autant que nécessaire.
+class ByteStream {
+  constructor(key, label) {
+    this.key = key;
+    this.label = label;
+    this.salt = crypto.getRandomValues(new Uint8Array(32));
+    this.block = 0;
+    this.buf = new Uint8Array(0);
+    this.i = 0;
+  }
+  async refill() {
+    const bits = await crypto.subtle.deriveBits(
+      { name: 'HKDF', hash: 'SHA-256', salt: this.salt, info: enc.encode(`R4ND0M/v1/${this.label}/${this.block++}`) },
+      this.key, 8192,
+    );
+    this.buf.fill(0);
+    this.buf = new Uint8Array(bits);
+    this.i = 0;
+  }
+  async bytes(n) {
+    const out = new Uint8Array(n);
+    let o = 0;
+    while (o < n) {
+      if (this.i >= this.buf.length) await this.refill();
+      const take = Math.min(n - o, this.buf.length - this.i);
+      out.set(this.buf.subarray(this.i, this.i + take), o);
+      this.i += take;
+      o += take;
+    }
+    return out;
+  }
+  // Entier uniforme dans [0, n), n ≤ 2^32 — rejection sampling, pas de modulo biaisé :
+  // on garde exactement `bits` bits (masque) et on rejette les valeurs ≥ n.
+  async below(n) {
+    if (n <= 1) return 0;
+    let bits = 0;
+    while (2 ** bits < n) bits++;
+    const size = Math.ceil(bits / 8);
+    const span = 2 ** bits;
+    for (;;) {
+      const bs = await this.bytes(size);
+      let x = 0;
+      for (const byte of bs) x = x * 256 + byte;
+      bs.fill(0);
+      x %= span; // masque exact : 2^bits divise 2^(8·size)
+      if (x < n) return x;
+    }
+  }
+  // Entier uniforme dans [0, range) pour un BigInt quelconque.
+  async belowBig(range) {
+    if (range <= 1n) return 0n;
+    const bits = (range - 1n).toString(2).length;
+    const mask = (1n << BigInt(bits)) - 1n;
+    const size = Math.ceil(bits / 8);
+    for (;;) {
+      const bs = await this.bytes(size);
+      let x = 0n;
+      for (const byte of bs) x = (x << 8n) | BigInt(byte);
+      bs.fill(0);
+      x &= mask;
+      if (x < range) return x;
+    }
+  }
+  wipe() {
+    this.buf.fill(0);
+    this.salt.fill(0);
+  }
+}
+
+/* ---------- Formats ---------- */
+
+const toHex = (b) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+const toB64 = (b) => btoa(String.fromCharCode(...b));
+const stripAccents = (s) => s.normalize('NFD').replace(/\p{M}/gu, '');
+
+function bigLog2(n) {
+  if (n <= BigInt(Number.MAX_SAFE_INTEGER)) return Math.log2(Number(n));
+  return n.toString(2).length;
+}
+
+function parseInt10(s) {
+  s = s.trim().replace(/[\s  _]/g, '');
+  if (!/^[-+]?\d{1,300}$/.test(s)) return null;
+  return BigInt(s);
+}
+
+function passwordAlphabet() {
+  return Object.keys(SETS).filter((k) => state.sets[k]).map((k) => SETS[k]).join('');
+}
+
+function listEntries() {
+  return el.listInput.value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+}
+
+function glyphsFor(f) {
+  return { hex: HEX, uuid: HEX, base64: B64, integer: SETS.digits, password: passwordAlphabet(), passphrase: SETS.lower }[f];
+}
+
+const generators = {
+  async hex(s) {
+    const L = state.len.hex;
+    const b = await s.bytes(Math.ceil(L / 2));
+    const t = toHex(b).slice(0, L);
+    b.fill(0);
+    return t;
+  },
+  async base64(s) {
+    const L = state.len.base64;
+    const b = await s.bytes(Math.ceil((L * 6) / 8));
+    const t = toB64(b).replace(/=+$/, '').slice(0, L);
+    b.fill(0);
+    return t;
+  },
+  async password(s) {
+    const active = Object.keys(SETS).filter((k) => state.sets[k]);
+    const alphabet = passwordAlphabet();
+    const L = state.len.password;
+    // On régénère tant qu'un jeu coché manque : la distribution reste uniforme
+    // sur l'ensemble des mots de passe valides.
+    for (;;) {
+      let p = '';
+      for (let i = 0; i < L; i++) p += alphabet[await s.below(alphabet.length)];
+      if (active.every((k) => [...p].some((c) => SETS[k].includes(c)))) return p;
+    }
+  },
+  async passphrase(s) {
+    const words = [];
+    for (let i = 0; i < state.len.passphrase; i++) {
+      let w = WORDS[await s.below(WORDS.length)];
+      if (state.pp.noAccents) w = stripAccents(w);
+      if (state.pp.capital) w = w[0].toLocaleUpperCase('fr-FR') + w.slice(1);
+      words.push(w);
+    }
+    return words.join(state.pp.sep);
+  },
+  async uuid(s) {
+    const b = await s.bytes(16);
+    b[6] = (b[6] & 0x0f) | 0x40; // version 4
+    b[8] = (b[8] & 0x3f) | 0x80; // variante RFC 9562
+    const h = toHex(b);
+    b.fill(0);
+    return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+  },
+};
+
+function itemBits(f) {
+  if (f === 'hex') return state.len.hex * 4;
+  if (f === 'base64') return state.len.base64 * 6;
+  if (f === 'password') return state.len.password * Math.log2(passwordAlphabet().length);
+  if (f === 'passphrase') return state.len.passphrase * Math.log2(WORDS.length);
+  if (f === 'uuid') return 122;
+  return 0;
+}
+
+async function makeOutput(s) {
+  const f = format();
+  const count = state.count[f];
+
+  if (generators[f]) {
+    const items = [];
+    for (let i = 0; i < count; i++) items.push(await generators[f](s));
+    return { kind: 'text', items, copy: items.join('\n'), bits: itemBits(f), perItem: true };
+  }
+
+  if (f === 'integer') {
+    const min = parseInt10(el.min.value);
+    const max = parseInt10(el.max.value);
+    el.min.setAttribute('aria-invalid', String(min === null));
+    el.max.setAttribute('aria-invalid', String(max === null || (min !== null && max < min)));
+    if (min === null || max === null) return { error: 'Entrez deux nombres entiers.' };
+    if (max < min) return { error: 'Le maximum doit être supérieur ou égal au minimum.' };
+    const range = max - min + 1n;
+    const items = [];
+    for (let i = 0; i < count; i++) items.push((min + (await s.belowBig(range))).toString());
+    return { kind: 'text', items, copy: items.join('\n'), bits: bigLog2(range), perItem: true };
+  }
+
+  if (f === 'dice') {
+    const faces = Number(state.faces);
+    const items = [];
+    for (let i = 0; i < count; i++) items.push(1 + (await s.below(faces)));
+    const sum = items.reduce((a, b) => a + b, 0);
+    return {
+      kind: 'dice', items, copy: items.join(', '), bits: count * Math.log2(faces),
+      extra: count > 1 ? `somme ${sum}` : `d${faces}`,
+    };
+  }
+
+  if (f === 'coin') {
+    const items = [];
+    for (let i = 0; i < count; i++) items.push((await s.below(2)) ? 'Face' : 'Pile');
+    const piles = items.filter((x) => x === 'Pile').length;
+    return {
+      kind: 'coin', items, copy: items.join(', '), bits: count,
+      extra: count > 1 ? `${piles} pile · ${count - piles} face` : null,
+    };
+  }
+
+  if (f === 'list') {
+    const entries = listEntries();
+    const n = entries.length;
+    if (n === 0) return { error: 'Collez une liste, une entrée par ligne.' };
+    const k = state.shuffleAll ? n : Math.min(state.count.list, n);
+    // Fisher–Yates partiel : chaque tirage est uniforme parmi les entrées restantes.
+    let bits = 0;
+    for (let i = 0; i < k; i++) {
+      const j = i + (await s.below(n - i));
+      [entries[i], entries[j]] = [entries[j], entries[i]];
+      bits += Math.log2(n - i);
+    }
+    const items = entries.slice(0, k);
+    return { kind: 'list', items, copy: items.join('\n'), bits, extra: `${k} sur ${n}` };
+  }
+}
+
+/* ---------- Rendu ---------- */
+
+function sizeClass(text, f) {
+  const len = text.length;
+  if (f === 'integer' && len <= 9) return 'xl';
+  return len <= 24 ? null : len <= 48 ? 'm' : 's';
+}
+
+// Remplit `node` avec le texte mis en forme. La copie utilise toujours le texte brut.
+function fillText(node, text, f, masked, grouped) {
+  node.textContent = '';
+  if (masked) {
+    node.textContent = '•'.repeat(Math.min(text.length, 64));
+    return;
+  }
+  if (grouped && (f === 'hex' || f === 'base64')) {
+    for (let i = 0; i < text.length; i += 4) {
+      const g = document.createElement('span');
+      g.textContent = text.slice(i, i + 4);
+      node.appendChild(g);
+    }
+  } else if (f === 'password') {
+    for (const c of text) {
+      const sp = document.createElement('span');
+      if (c >= '0' && c <= '9') sp.className = 'd';
+      else if (!/[a-z]/i.test(c)) sp.className = 'y';
+      sp.textContent = c;
+      node.appendChild(sp);
+    }
+  } else {
+    node.textContent = text;
+  }
+}
+
+function render(res, animate) {
+  const f = format();
+  const out = el.out;
+  const masked = state.mask && SECRET.has(f);
+  cancelAnimationFrame(out._raf);
+  out.className = 'out';
+  out.removeAttribute('aria-busy');
+  out.textContent = '';
+  el.eye.hidden = !SECRET.has(f) || !!res.error;
+  const card = el.out.parentElement;
+  card.classList.toggle('has-eye', !el.eye.hidden);
+  card.classList.toggle('has-rows', !res.error && res.kind !== 'dice' && res.kind !== 'coin'
+    && (res.items.length > 1 || (res.kind === 'list' && state.shuffleAll)));
+  el.eye.setAttribute('aria-pressed', String(state.mask));
+  el.eye.setAttribute('aria-label', state.mask ? 'Afficher le résultat' : 'Masquer le résultat');
+
+  if (res.error) {
+    out.textContent = res.error;
+    out.classList.add('empty');
+    setMeta([]);
+    el.copy.disabled = true;
+    return;
+  }
+  el.copy.disabled = false;
+  el.copyLabel.textContent = res.items.length > 1 ? 'Copier tout' : 'Copier';
+  const motion = animate && !reducedMotion.matches;
+
+  if (res.kind === 'dice' || res.kind === 'coin') {
+    const tiles = document.createElement('div');
+    tiles.className = 'tiles';
+    const big = res.items.length === 1;
+    res.items.forEach((v, i) => {
+      const t = document.createElement('span');
+      t.className = res.kind === 'dice' ? 'die' : `coin ${v === 'Pile' ? 'pile' : 'face'}`;
+      if (big) t.classList.add('big');
+      if (motion) {
+        t.classList.add(res.kind === 'dice' ? 'roll' : 'flip');
+        t.style.animationDelay = `${Math.min(i, 12) * 35}ms`;
+      }
+      t.textContent = v;
+      tiles.appendChild(t);
+    });
+    out.appendChild(tiles);
+  } else if (res.items.length > 1 || (res.kind === 'list' && state.shuffleAll)) {
+    out.classList.add('rows');
+    if (res.kind === 'list') out.classList.add('sans');
+    res.items.forEach((text, i) => {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'row-item';
+      row.dataset.i = i;
+      row.title = 'Copier cette ligne';
+      if (motion) row.style.animationDelay = `${Math.min(i, 15) * 25}ms`;
+      const num = document.createElement('span');
+      num.className = 'n';
+      num.textContent = i + 1;
+      const t = document.createElement('span');
+      t.className = 't';
+      fillText(t, text, f, masked, false);
+      row.append(num, t);
+      out.appendChild(row);
+    });
+  } else if (res.kind === 'list') {
+    out.classList.add('pick', 'fresh');
+    out.textContent = res.items[0];
+  } else {
+    const text = res.items[0];
+    const size = sizeClass(text, f);
+    if (size) out.classList.add(size);
+    if (masked) {
+      out.classList.add('masked', 'fresh');
+      fillText(out, text, f, true, false);
+    } else if (motion) {
+      out.setAttribute('aria-busy', 'true');
+      const run = state.gen;
+      scramble(out, text, glyphsFor(f), Math.min(700, 320 + text.length * 6), () => {
+        if (run !== state.gen) return;
+        out.classList.toggle('grouped', f === 'hex' || f === 'base64');
+        fillText(out, text, f, false, true);
+        out.removeAttribute('aria-busy');
+      });
+    } else {
+      out.classList.add('fresh');
+      out.classList.toggle('grouped', f === 'hex' || f === 'base64');
+      fillText(out, text, f, false, true);
+    }
+  }
+
+  const parts = [];
+  const cap = (x) => Math.min(x, SEED_BITS);
+  const bitsText = (x) => `${fr(cap(x), x < 10 ? 1 : 0)} bit${cap(x) >= 2 ? 's' : ''}`;
+  if (res.perItem) {
+    const n = res.items.length;
+    parts.push(`${n > 1 ? `${n} × ` : ''}${bitsText(res.bits)} d'entropie${res.bits > SEED_BITS ? ' (plafond)' : ''}`);
+  } else {
+    parts.push(`${bitsText(res.bits)} d'entropie`);
+  }
+  if (res.extra) parts.push(res.extra);
+  if (state.source === 'import') parts.push('image importée');
+  setMeta(parts);
+}
+
+function setMeta(parts) {
+  el.meta.textContent = '';
+  for (const p of parts) el.meta.append(Object.assign(document.createElement('span'), { textContent: p }));
+}
+
+async function generate({ animate = false } = {}) {
+  if (!state.key) return;
+  const run = ++state.gen;
+  const stream = new ByteStream(state.key, format());
+  let res;
+  try {
+    res = await makeOutput(stream);
+  } finally {
+    stream.wipe();
+  }
+  if (run !== state.gen) return;
+  state.res = res;
+  render(res, animate);
+}
+
+function renderReport() {
+  const r = state.assessment;
+  el.report.hidden = !(state.source === 'camera' && r);
+  if (el.report.hidden) return;
+  $('#reportTitle').textContent = `Bruit du capteur · ${fr(r.h, 1)} bits/px · SP 800-90B ✓`;
+  const ok = (b) => (b ? '✓' : '✗');
+  const rows = [
+    ['Échantillons', fr(r.n)],
+    ['H · valeur la plus fréquente', `${fr(r.hMcv, 2)} bits`],
+    ['H · chaîne de bits (MCV, Markov)', `${fr(r.hBits, 2)} bits`],
+    ['H retenue par échantillon', `${fr(r.h, 2)} bits`],
+    ['Test de répétition', `${r.rct.max} < ${r.rct.cutoff} ${ok(r.rct.ok)}`],
+    ['Test de proportion', `${r.apt.max} < ${r.apt.cutoff} ${ok(r.apt.ok)}`],
+    ['Entropie estimée', `${fr(Math.floor(r.credited))} ≥ ${NIST.REQUIRED_BITS} ${ok(r.credited >= NIST.REQUIRED_BITS)}`],
+  ];
+  el.reportList.textContent = '';
+  for (const [k, v] of rows) {
+    const row = document.createElement('div');
+    row.className = 'r';
+    row.append(Object.assign(document.createElement('dt'), { textContent: k }), Object.assign(document.createElement('dd'), { textContent: v }));
+    el.reportList.appendChild(row);
+  }
+}
+
+/* ---------- Réglages ---------- */
+
+const segs = [];
+function makeSeg(container, options, get, set) {
+  container.textContent = '';
+  const thumb = document.createElement('span');
+  thumb.className = 'seg-thumb';
+  thumb.setAttribute('aria-hidden', 'true');
+  container.appendChild(thumb);
+  const buttons = options.map(([v, label]) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.setAttribute('role', 'radio');
+    b.dataset.v = v;
+    b.textContent = label;
+    container.appendChild(b);
+    return b;
+  });
+  const api = {
+    sync() {
+      const cur = get();
+      let sel = null;
+      for (const b of buttons) {
+        const on = b.dataset.v === cur;
+        b.setAttribute('aria-checked', String(on));
+        b.tabIndex = on ? 0 : -1;
+        if (on) sel = b;
+      }
+      if (sel && sel.offsetWidth) {
+        thumb.style.width = `${sel.offsetWidth}px`;
+        thumb.style.transform = `translateX(${sel.offsetLeft}px)`;
+      }
+    },
+  };
+  container.addEventListener('click', (e) => {
+    const b = e.target.closest('button[data-v]');
+    if (!b || b.dataset.v === get()) return;
+    set(b.dataset.v);
+    b.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+  });
+  container.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    const i = buttons.findIndex((b) => b.dataset.v === get());
+    const next = buttons[(i + (e.key === 'ArrowRight' ? 1 : buttons.length - 1)) % buttons.length];
+    next.focus();
+    next.click();
+    e.preventDefault();
+  });
+  segs.push(api);
+  return api;
+}
+
+const subSegs = {};
+function buildControls() {
+  makeSeg(el.catSeg, CATS.map((c) => [c.id, c.label]), () => state.cat, (v) => {
+    state.cat = v;
+    changed({ animate: true });
+  });
+  for (const c of CATS) {
+    const box = document.createElement('div');
+    box.className = 'seg sub';
+    box.setAttribute('role', 'radiogroup');
+    box.setAttribute('aria-label', c.label);
+    el.subs.appendChild(box);
+    subSegs[c.id] = { box, seg: makeSeg(box, c.formats, () => state.sub[c.id], (v) => {
+      state.sub[c.id] = v;
+      changed({ animate: true });
+    }) };
+  }
+  makeSeg(el.sepSeg, SEPARATORS, () => state.pp.sep, (v) => { state.pp.sep = v; changed(); });
+  makeSeg(el.facesSeg, FACES, () => state.faces, (v) => { state.faces = v; changed({ animate: true }); });
+}
+
+function syncControls() {
+  const f = format();
+  for (const c of CATS) subSegs[c.id].box.hidden = c.id !== state.cat;
+  const conf = LEN[f];
+  el.lenField.hidden = !conf;
+  el.pwField.hidden = f !== 'password';
+  el.ppField.hidden = f !== 'passphrase';
+  el.intField.hidden = f !== 'integer';
+  el.diceField.hidden = f !== 'dice';
+  el.listField.hidden = f !== 'list';
+  if (conf) {
+    el.lenLabel.textContent = conf.label;
+    el.len.min = conf.min;
+    el.len.max = conf.max;
+    el.len.value = state.len[f];
+    updateLenLabel();
+  }
+  el.pwField.querySelectorAll('input[data-set]').forEach((cb) => { cb.checked = state.sets[cb.dataset.set]; });
+  el.noAccents.checked = state.pp.noAccents;
+  el.capital.checked = state.pp.capital;
+  el.shuffleAll.checked = state.shuffleAll;
+  el.clipClear.checked = state.clipClear;
+  syncCount();
+  segs.forEach((s) => s.sync());
+}
+
+function countMax() {
+  return format() === 'list' ? Math.max(1, listEntries().length) : COUNT_MAX;
+}
+function syncCount() {
+  const f = format();
+  el.countField.hidden = f === 'list' && state.shuffleAll;
+  el.countLabel.textContent = COUNT_LABEL[f] || 'Quantité';
+  const max = countMax();
+  const v = Math.min(state.count[f], max);
+  el.countVal.textContent = v;
+  el.dec.disabled = v <= 1;
+  el.inc.disabled = v >= max;
+  if (f === 'list') el.listCount.textContent = listEntries().length;
+}
+
+function updateLenLabel() {
+  const v = Number(el.len.value);
+  el.lenVal.textContent = v;
+  const p = ((v - el.len.min) / (el.len.max - el.len.min)) * 100;
+  el.len.style.setProperty('--p', `${p}%`);
+}
+
+function changed(opts) {
+  syncControls();
+  savePrefs();
+  generate(opts);
+}
+
+function showResult() {
+  const n = el.notice;
+  if (state.source === 'import') {
+    n.innerHTML = "<strong>Image importée.</strong> Une image existante peut être connue d'autres personnes, et aucun test de bruit n'est possible sur un fichier : pour un aléa issu d'un capteur, préférez une photo prise en direct.";
+    n.hidden = false;
+  } else {
+    n.hidden = true;
+  }
+  el.report.open = false;
+  renderReport();
+  show('result');
+  syncControls();
+  generate({ animate: true });
+}
+
+/* ---------- Import (repli) ---------- */
+
+async function importImage(file) {
+  if (!file) return;
+  try {
+    const t0 = performance.now();
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    const seed = await mix([bytes], [t0, performance.now(), file.lastModified || 0]);
+    await setSeed(seed, 'import', null);
+    showResult();
+  } catch (err) {
+    console.error(err);
+    fallback('error');
+  }
+}
+
+/* ---------- Copie et presse-papiers ---------- */
+
+async function writeClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0';
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch {}
+    ta.remove();
+    return ok;
+  }
+}
+
+// Effacement automatique : le navigateur n'autorise l'écriture que page au premier plan ;
+// sinon on réessaie au retour sur la page.
+const clip = { timer: 0, left: 0, pending: false, hideTimer: 0 };
+function scheduleClear() {
+  clearInterval(clip.timer);
+  clearTimeout(clip.hideTimer);
+  clip.pending = false;
+  if (!state.clipClear) { el.clipNote.textContent = ''; return; }
+  clip.left = 30;
+  const tick = () => { el.clipNote.textContent = `Presse-papiers effacé dans ${clip.left} s`; };
+  tick();
+  clip.timer = setInterval(() => {
+    clip.left--;
+    if (clip.left > 0) return tick();
+    clearInterval(clip.timer);
+    clearClipboard();
+  }, 1000);
+}
+async function clearClipboard() {
+  let ok = false;
+  try { await navigator.clipboard.writeText(''); ok = true; } catch {}
+  if (ok) {
+    clip.pending = false;
+    el.clipNote.textContent = 'Presse-papiers effacé';
+    clip.hideTimer = setTimeout(() => { el.clipNote.textContent = ''; }, 2500);
+  } else if (!document.hasFocus()) {
+    clip.pending = true;
+    el.clipNote.textContent = 'Revenez sur la page pour effacer le presse-papiers';
+  } else {
+    clip.pending = false;
+    el.clipNote.textContent = 'Effacement automatique impossible ici : pensez à vider le presse-papiers';
+  }
+}
+function cancelClear() {
+  clearInterval(clip.timer);
+  clearTimeout(clip.hideTimer);
+  clip.pending = false;
+  el.clipNote.textContent = '';
+}
+
+let copyTimer = 0;
+async function copyText(text, rowEl) {
+  if (!text) return;
+  if (!(await writeClipboard(text))) return;
+  haptic(8);
+  if (rowEl) {
+    rowEl.classList.add('copied');
+    setTimeout(() => rowEl.classList.remove('copied'), 900);
+  }
+  el.copy.classList.add('done');
+  el.copyLabel.textContent = rowEl ? 'Ligne copiée' : 'Copié';
+  clearTimeout(copyTimer);
+  copyTimer = setTimeout(() => {
+    el.copy.classList.remove('done');
+    el.copyLabel.textContent = state.res && state.res.items && state.res.items.length > 1 ? 'Copier tout' : 'Copier';
+  }, 1600);
+  scheduleClear();
+}
+
+/* ---------- Événements ---------- */
+
+el.enable.addEventListener('click', startCamera);
+el.shutter.addEventListener('click', capture);
+el.flip.addEventListener('click', () => {
+  state.facing = state.facing === 'environment' ? 'user' : 'environment';
+  startCamera();
+});
+el.copy.addEventListener('click', () => state.res && !state.res.error && copyText(state.res.copy));
+el.out.addEventListener('click', (e) => {
+  const row = e.target.closest('.row-item');
+  if (row && state.res) copyText(state.res.items[Number(row.dataset.i)], row);
+});
+// Une sélection manuelle copie le résultat exact, sans mise en forme ni points de masquage.
+el.out.addEventListener('copy', (e) => {
+  if (!state.res || state.res.error) return;
+  e.clipboardData.setData('text/plain', state.res.copy);
+  e.preventDefault();
+  scheduleClear();
+});
+el.eye.addEventListener('click', () => {
+  state.mask = !state.mask;
+  savePrefs();
+  if (state.res) render(state.res, false);
+});
+el.again.addEventListener('click', () => {
+  state.key = null;
+  state.source = null;
+  state.assessment = null;
+  state.res = null;
+  el.out.textContent = '';
+  animateLogo();
+  startCamera();
+});
+el.retry.addEventListener('click', startCamera);
+el.importBtn.addEventListener('click', () => el.file.click());
+el.file.addEventListener('change', () => {
+  const f = el.file.files[0];
+  el.file.value = '';
+  importImage(f);
+});
+
+el.len.addEventListener('input', () => {
+  state.len[format()] = Number(el.len.value);
+  updateLenLabel();
+  savePrefs();
+  generate();
+});
+
+el.pwField.addEventListener('change', (e) => {
+  const cb = e.target.closest('input[data-set]');
+  if (!cb) return;
+  // Au moins un jeu de caractères doit rester actif.
+  if (!cb.checked && !Object.keys(SETS).some((k) => k !== cb.dataset.set && state.sets[k])) {
+    cb.checked = true;
+    return;
+  }
+  state.sets[cb.dataset.set] = cb.checked;
+  changed();
+});
+el.noAccents.addEventListener('change', () => { state.pp.noAccents = el.noAccents.checked; changed(); });
+el.capital.addEventListener('change', () => { state.pp.capital = el.capital.checked; changed(); });
+el.shuffleAll.addEventListener('change', () => { state.shuffleAll = el.shuffleAll.checked; changed({ animate: true }); });
+el.clipClear.addEventListener('change', () => {
+  state.clipClear = el.clipClear.checked;
+  savePrefs();
+  if (!state.clipClear) cancelClear();
+});
+
+function stepCount(d) {
+  const f = format();
+  const v = Math.max(1, Math.min(countMax(), Math.min(state.count[f], countMax()) + d));
+  if (v === state.count[f]) return;
+  state.count[f] = v;
+  changed();
+}
+el.dec.addEventListener('click', () => stepCount(-1));
+el.inc.addEventListener('click', () => stepCount(1));
+
+let inputTimer = 0;
+[el.min, el.max, el.listInput].forEach((input) => input.addEventListener('input', () => {
+  if (input === el.listInput) syncCount();
+  clearTimeout(inputTimer);
+  inputTimer = setTimeout(() => generate(), 250);
+}));
+
+window.addEventListener('resize', () => segs.forEach((s) => s.sync()));
+
+// Raccourcis clavier : Espace pour capturer, C pour copier.
+document.addEventListener('keydown', (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey || e.target.closest('input, textarea')) return;
+  if (state.view === 'camera' && e.key === ' ' && e.target === document.body && state.stream) {
+    e.preventDefault();
+    capture();
+  } else if (state.view === 'result' && (e.key === 'c' || e.key === 'C') && state.res && !state.res.error) {
+    copyText(state.res.copy);
+  }
+});
+
+// La caméra est coupée dès que la page n'est plus visible.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    if (state.stream) stopCamera();
+  } else if (state.view === 'camera' && !state.stream && !state.busy) {
+    startCamera();
+  }
+});
+window.addEventListener('focus', () => { if (clip.pending) clearClipboard(); });
+window.addEventListener('pagehide', () => {
+  stopCamera();
+  state.key = null;
+});
+
+/* ---------- Démarrage ---------- */
+
+(async function init() {
+  loadPrefs();
+  buildControls();
+  setHint();
+  animateLogo();
+  if ('serviceWorker' in navigator && /^https?:$/.test(location.protocol)) {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
+  if (!window.crypto || !crypto.subtle || !crypto.getRandomValues) return fallback('nocrypto');
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) return fallback('unsupported');
+  show('camera');
+  // Si l'accès a déjà été accordé, on ouvre directement l'aperçu.
+  try {
+    const p = await navigator.permissions.query({ name: 'camera' });
+    if (p.state === 'granted') startCamera();
+    else if (p.state === 'denied') fallback('denied');
+  } catch { /* API Permissions indisponible : on attend le clic */ }
+})();
+</script>
+</body>
+</html>
